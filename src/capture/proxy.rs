@@ -4,13 +4,12 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use http_body_util::{BodyExt, Full};
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::service::service_fn;
@@ -19,6 +18,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
 use super::client::{self, HttpClient};
+use super::id::IdGen;
 use super::record::{Body, Exchange, RequestRecord};
 use super::store::Store;
 
@@ -36,15 +36,8 @@ struct Ctx {
     base: String,
     client: HttpClient,
     store: Mutex<Store>,
-    seq: AtomicU64,
+    ids: IdGen,
     json: bool,
-}
-
-impl Ctx {
-    fn next_id(&self, started: DateTime<Utc>) -> String {
-        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
-        format!("{}-{:06}", started.timestamp_millis(), seq)
-    }
 }
 
 /// Normalize the target into a `scheme://authority` base, rejecting anything we
@@ -78,7 +71,7 @@ pub async fn serve(config: ProxyConfig) -> Result<()> {
         base: base.clone(),
         client: client::build_client(),
         store: Mutex::new(store),
-        seq: AtomicU64::new(1),
+        ids: IdGen::new(),
         json: config.json,
     });
 
@@ -149,7 +142,7 @@ async fn handle(
         body: Body::from_bytes(&body_bytes),
     };
 
-    let id = ctx.next_id(started);
+    let id = ctx.ids.next(started);
     let result = client::send(&ctx.client, &parts.method, &url, &req_headers, body_bytes).await;
     let latency_ms = timer.elapsed().as_millis() as u64;
 

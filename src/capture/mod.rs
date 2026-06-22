@@ -2,6 +2,7 @@
 //! replay consumer that validates the format.
 
 pub mod client;
+pub mod id;
 pub mod proxy;
 pub mod record;
 pub mod replay;
