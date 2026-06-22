@@ -1,0 +1,19 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+
+# Web dashboard (future phases)
+node_modules/
+dist/
+.vite/
+
+# Captures / local data
+*.reqradar
+captures/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

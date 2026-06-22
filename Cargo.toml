@@ -1,0 +1,27 @@
+[package]
+name = "reqradar"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Capture, inspect, replay and diff HTTP requests from your terminal — TUI + web dashboard, custom YAML rules, and instant bug reports."
+authors = ["ReqRadar contributors"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/toriyama237/reqradar"
+homepage = "https://github.com/toriyama237/reqradar"
+keywords = ["http", "proxy", "debugging", "tui", "networking"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+
+[[bin]]
+name = "reqradar"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"
