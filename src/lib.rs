@@ -6,4 +6,5 @@
 pub mod capture;
 pub mod cli;
 pub mod commands;
+pub mod detect;
 pub mod redact;

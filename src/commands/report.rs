@@ -93,6 +93,15 @@ fn render_markdown(ex: &crate::capture::record::Exchange) -> String {
     }
     out.push('\n');
 
+    let findings = crate::detect::scan_exchange(ex, &crate::detect::Config::default());
+    if !findings.is_empty() {
+        out.push_str("## Findings\n\n");
+        for f in &findings {
+            out.push_str(&format!("- **{}:** {}\n", f.kind.label(), f.detail));
+        }
+        out.push('\n');
+    }
+
     out.push_str("## Request\n\n");
     out.push_str("```http\n");
     out.push_str(&format!("{} {}\n", ex.request.method, ex.request.uri));
@@ -169,5 +178,40 @@ mod tests {
         assert!(md.contains("[REDACTED]"));
         assert!(!md.contains("real-token"));
         assert!(md.contains("GET /secret"));
+    }
+
+    #[test]
+    fn report_includes_5xx_finding_without_body_secret_from_headers() {
+        let ex = Exchange {
+            id: "1-000002".into(),
+            started_at: Utc::now(),
+            upstream: "http://127.0.0.1:3000".into(),
+            latency_ms: 4,
+            request: RequestRecord {
+                method: "GET".into(),
+                uri: "/fail".into(),
+                route: "/fail".into(),
+                version: "HTTP/1.1".into(),
+                headers: vec![Header {
+                    name: "Authorization".into(),
+                    value: "Bearer real-token".into(),
+                }],
+                body: Body::Empty,
+            },
+            response: Some(ResponseRecord {
+                status: 503,
+                version: "HTTP/1.1".into(),
+                headers: vec![],
+                body: Body::Text {
+                    text: "nope".into(),
+                },
+            }),
+            error: None,
+        };
+        let md = render_markdown(&ex);
+        assert!(md.contains("## Findings"));
+        assert!(md.contains("**5xx:** HTTP 503"));
+        assert!(!md.contains("real-token"));
+        assert!(!md.contains("## Findings\n\n- **secret:"));
     }
 }

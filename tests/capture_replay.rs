@@ -106,6 +106,7 @@ async fn capture_get_and_post_then_replay_post() {
         json: false,
         allow_lan: false,
         max_body_bytes: 1_048_576,
+        slow_ms: 500,
     })
     .await
     .expect("proxy binds");
@@ -156,6 +157,7 @@ async fn refuses_non_loopback_without_allow_lan() {
         json: false,
         allow_lan: false,
         max_body_bytes: 1024,
+        slow_ms: 500,
     })
     .await
     {

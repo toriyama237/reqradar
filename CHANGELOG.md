@@ -17,6 +17,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `cargo-audit` job and Dependabot for Cargo and GitHub Actions.
 - CONTRIBUTING, SECURITY, issue/PR templates, CODEOWNERS.
 
+- `reqradar inspect` scans a `.rrlog` for 5xx, slow requests (default 500ms) and credential-looking strings in text bodies. `--fail` exits 1 when anything matches.
+- Live capture one-liners get `[5xx]` / `[slow]` / `[secret]` tags.
+- Markdown reports include a Findings section when detectors fire.
+
 ### Changed
 
 - Package version is `0.1.0-dev` (no release tag yet).

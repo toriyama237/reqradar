@@ -21,6 +21,10 @@ Shareable output (`reqradar report`, and `--json` stdout) replaces values of
 Redaction is not a guarantee that a body contains no secrets. Do not publish
 reports from production traffic without reading them.
 
+`reqradar inspect` flags Bearer tokens, JSON `password` fields, `password=`
+forms and `AKIA…` access key ids in **text bodies**. Findings describe the
+pattern, they do not print the matched secret. Binary bodies are not scanned.
+
 ## Network exposure
 
 The proxy listens on `127.0.0.1` by default. Binding a non-loopback address

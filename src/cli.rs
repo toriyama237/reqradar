@@ -24,6 +24,9 @@ pub enum Command {
     /// Replay a previously captured request.
     Replay(commands::replay::ReplayArgs),
 
+    /// Scan a .rrlog for 5xx, slow requests and secrets in bodies.
+    Inspect(commands::inspect::InspectArgs),
+
     /// Diff two captures (not implemented yet).
     Diff(commands::diff::DiffArgs),
 
@@ -54,6 +57,7 @@ impl Cli {
             None => commands::capture::run(commands::capture::CaptureArgs::default()),
             Some(Command::Capture(args)) => commands::capture::run(args),
             Some(Command::Replay(args)) => commands::replay::run(args),
+            Some(Command::Inspect(args)) => commands::inspect::run(args),
             Some(Command::Diff(args)) => commands::diff::run(args),
             Some(Command::Report(args)) => commands::report::run(args),
             Some(Command::Rules(args)) => commands::rules::run(args),
@@ -72,9 +76,26 @@ mod tests {
     }
 
     #[test]
-    fn parses_capture_web_flag() {
-        let cli = Cli::parse_from(["reqradar", "capture", "--web"]);
-        assert!(matches!(cli.command, Some(Command::Capture(_))));
+    fn parses_inspect() {
+        let cli = Cli::parse_from(["reqradar", "inspect", "--fail", "--slow-ms", "200"]);
+        assert!(matches!(cli.command, Some(Command::Inspect(_))));
+    }
+
+    #[test]
+    fn help_does_not_claim_yaml_rules_work() {
+        let mut buf = Vec::new();
+        Cli::command()
+            .write_help(&mut buf)
+            .expect("help is writable");
+        let help = String::from_utf8(buf).expect("help is utf-8");
+        assert!(
+            help.contains("not implemented"),
+            "help should keep rules/diff unimplemented:\n{help}"
+        );
+        assert!(
+            !help.to_ascii_lowercase().contains("yaml"),
+            "help must not promise YAML:\n{help}"
+        );
     }
 
     #[test]
