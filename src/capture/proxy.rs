@@ -22,6 +22,7 @@ use super::client::{self, CollectError, HttpClient};
 use super::id::IdGen;
 use super::record::{Body, Exchange, RequestRecord};
 use super::store::Store;
+use crate::detect;
 use crate::redact;
 
 pub struct ProxyConfig {
@@ -36,6 +37,8 @@ pub struct ProxyConfig {
     pub allow_lan: bool,
     /// Max buffered request or response body, in bytes.
     pub max_body_bytes: usize,
+    /// Latency threshold (ms) for live `[slow]` tags.
+    pub slow_ms: u64,
 }
 
 pub struct RunningProxy {
@@ -58,6 +61,7 @@ struct Ctx {
     ids: IdGen,
     json: bool,
     max_body_bytes: usize,
+    detect: detect::Config,
 }
 
 /// Normalize the target into a `scheme://authority` base, rejecting anything we
@@ -144,6 +148,9 @@ pub async fn spawn(config: ProxyConfig) -> Result<RunningProxy> {
         ids: IdGen::new(),
         json: config.json,
         max_body_bytes: config.max_body_bytes,
+        detect: detect::Config {
+            slow_ms: config.slow_ms,
+        },
     });
 
     let listener = TcpListener::bind(config.listen)
@@ -263,7 +270,12 @@ async fn handle(
             Err(e) => tracing::error!("failed to serialize exchange: {e}"),
         }
     } else {
-        println!("{}", exchange.summary());
+        let tags = detect::tags(&exchange, &ctx.detect);
+        if tags.is_empty() {
+            println!("{}", exchange.summary());
+        } else {
+            println!("{}  {}", exchange.summary(), tags);
+        }
     }
 
     Ok(client_response)

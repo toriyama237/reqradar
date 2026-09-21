@@ -44,6 +44,10 @@ pub struct CaptureArgs {
     /// Maximum request or response body buffered in memory (bytes).
     #[arg(long, default_value_t = DEFAULT_MAX_BODY_BYTES)]
     pub max_body_bytes: usize,
+
+    /// Tag live lines when latency is at least this many milliseconds.
+    #[arg(long, default_value_t = crate::detect::DEFAULT_SLOW_MS)]
+    pub slow_ms: u64,
 }
 
 impl Default for CaptureArgs {
@@ -57,6 +61,7 @@ impl Default for CaptureArgs {
             web_port: 7777,
             allow_lan: false,
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            slow_ms: crate::detect::DEFAULT_SLOW_MS,
         }
     }
 }
@@ -88,6 +93,7 @@ pub fn run(args: CaptureArgs) -> Result<()> {
         json: args.json,
         allow_lan: args.allow_lan,
         max_body_bytes: args.max_body_bytes,
+        slow_ms: args.slow_ms,
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

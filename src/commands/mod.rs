@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod diff;
+pub mod inspect;
 pub mod replay;
 pub mod report;
 pub mod rules;
@@ -11,7 +12,7 @@ use anyhow::{bail, Result};
 pub(crate) fn not_yet_implemented(feature: &str) -> Result<()> {
     bail!(
         "`{feature}` is not implemented in 0.1.0-dev.\n\
-         Shipped today: `capture` (HTTP reverse proxy) and `replay`, plus `report` (Markdown).\n\
+         Shipped today: `capture`, `replay`, `report` (Markdown), `inspect`.\n\
          See the roadmap: https://github.com/toriyama237/reqradar#roadmap"
     );
 }

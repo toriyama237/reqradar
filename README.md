@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/toriyama237/reqradar/actions/workflows/ci.yml/badge.svg)](https://github.com/toriyama237/reqradar/actions/workflows/ci.yml)
 
-> **Status: 0.1.0-dev.** `capture`, `replay`, and Markdown `report` work. Diff, YAML rules, TUI, web UI, and HTTPS do not.
+> **Status: 0.1.0-dev.** `capture`, `replay`, Markdown `report`, and `inspect` work. Diff, YAML rules, TUI, web UI, and HTTPS do not.
 
 ## Why
 
@@ -33,6 +33,8 @@ reqradar replay <id> --target http://127.0.0.1:3000
 
 reqradar report <id>                          # Markdown on stdout, secrets redacted
 reqradar report <id> -o bug.md
+reqradar inspect                              # newest .rrlog: 5xx, slow, secrets in bodies
+reqradar inspect --file session.rrlog --fail
 ```
 
 `--json` on `capture` prints each exchange as JSON on stdout with credential headers redacted. The on-disk `.rrlog` keeps original values so replay can authenticate.
@@ -44,6 +46,7 @@ reqradar report <id> -o bug.md
 | `reqradar capture --target <url>` | Shipped |
 | `reqradar replay <id>` | Shipped |
 | `reqradar report <id>` | Shipped (Markdown; PDF is not) |
+| `reqradar inspect` | Shipped (5xx, slow, secrets in text bodies; no YAML) |
 | `reqradar capture --web` | Not implemented |
 | `reqradar diff` | Not implemented |
 | `reqradar rules` | Not implemented |
@@ -53,6 +56,7 @@ Useful `capture` flags:
 - `--listen 127.0.0.1:8080` — non-loopback binds require `--allow-lan`
 - `--max-body-bytes` — default 1 MiB; larger bodies return 413
 - `--out path.rrlog`
+- `--slow-ms` — default 500; live lines get `[slow]` at or above this
 - `-v` / `-vv` / `-vvv` — tracing on stderr
 
 ## Architecture
@@ -61,7 +65,7 @@ Useful `capture` flags:
 client  -->  ReqRadar (HTTP/1 reverse proxy)  -->  upstream
                  |
                  +-- append Exchange as JSON Lines (.rrlog, mode 0600)
-                 +-- replay / report read the same file
+                 +-- replay / report / inspect read the same file
 ```
 
 The crate is a library (`reqradar`) plus a thin binary. Integration tests drive `spawn()` against an in-process upstream.
@@ -84,15 +88,14 @@ Workflow: [CONTRIBUTING.md](CONTRIBUTING.md). GitHub Flow (`main` + PR). No `dev
 
 ## Roadmap
 
-Shipped in this development line: capture, `.rrlog`, replay, Markdown report, bind guard, body cap, header redaction on shareable output.
+Shipped in this development line: capture, `.rrlog`, replay, Markdown report, `inspect` (5xx / slow / body secrets), bind guard, body cap, header redaction on shareable output.
 
 Next, in order:
 
-1. Built-in detectors (5xx, slow requests, leaked `Authorization` in report bodies)
-2. `diff` of two `.rrlog` files
-3. YAML rules
-4. TUI, then `--web`
-5. HTTPS / `brew` / crates.io only after the CLI loop is boring
+1. `diff` of two `.rrlog` files
+2. YAML rules (only after the three built-in detectors have been used in anger)
+3. TUI, then `--web`
+4. HTTPS / `brew` / crates.io only after the CLI loop is boring
 
 ## License
 
