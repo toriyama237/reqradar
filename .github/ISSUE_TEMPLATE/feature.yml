@@ -1,0 +1,55 @@
+name: Feature
+description: Propose a user-facing change
+title: "feat: "
+labels: [feature]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this exists. What a user is doing today instead.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The precise gap in ReqRadar.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed solution
+  - type: textarea
+    id: technical
+    attributes:
+      label: Technical considerations
+      description: Impact on the .rrlog format, replay, CLI flags, security.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Verifiable checks that close this issue.
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing
+  - type: textarea
+    id: dod
+    attributes:
+      label: Definition of Done
+      value: |
+        - [ ] Behaviour matches acceptance criteria
+        - [ ] Tests added or updated
+        - [ ] README / --help updated if the CLI changed
+        - [ ] No secrets in logs or reports
+        - [ ] CHANGELOG [Unreleased] updated
