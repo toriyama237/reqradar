@@ -1,115 +1,99 @@
 # ReqRadar
 
-> Capture, inspecte, rejoue et compare tes requêtes HTTP — directement depuis le terminal.
+**Capture, inspect, replay HTTP — then paste a bug report.** Reverse proxy in front of a local backend. Not a TUI. Not a dashboard. HTTP only.
 
-ReqRadar est un outil en **Rust** pour intercepter le trafic HTTP, détecter les
-patterns suspects (N+1, requêtes lentes, secrets qui fuient, retries en boucle…)
-et transformer un bug réseau en rapport prêt à coller dans un ticket — le tout
-sans quitter ton terminal, et avec un dashboard web optionnel.
+[![CI](https://github.com/toriyama237/reqradar/actions/workflows/ci.yml/badge.svg)](https://github.com/toriyama237/reqradar/actions/workflows/ci.yml)
 
-> **Statut : moteur de capture fonctionnel.** ReqRadar agit en reverse proxy
-> transparent devant un backend local, enregistre chaque échange au format
-> `.rrlog` (JSON Lines) et sait rejouer une requête capturée. La TUI, le
-> dashboard web, le diff et le rapport arrivent ensuite (voir la [roadmap](#roadmap)).
+> **Status: 0.1.0-dev.** `capture`, `replay`, and Markdown `report` work. Diff, YAML rules, TUI, web UI, and HTTPS do not.
 
----
+## Why
 
-## Pourquoi ?
+Debugging an HTTP integration today means juggling `curl`, verbose logs, a heavy GUI proxy, and captures you cannot replay. ReqRadar is the short path from “there is a network bug” to “here is the exchange, replay it, paste this into the ticket.”
 
-Déboguer une intégration HTTP aujourd'hui, c'est jongler entre `curl`, des logs
-verbeux, un proxy lourd à configurer et des captures impossibles à rejouer.
-ReqRadar vise le chemin le plus court entre « il y a un bug réseau » et « voici
-exactement ce qui s'est passé, rejoue-le ».
-
-## Démarrage rapide
-
-Place ReqRadar devant ton backend local et envoie ton trafic via le proxy :
+## Quick start
 
 ```bash
-# 1. ReqRadar écoute sur :8080 et forwarde tout vers ton backend sur :3000
+cargo install --path .
 reqradar capture --target http://localhost:3000 --listen 127.0.0.1:8080
-
-# 2. Dans un autre terminal, tape le proxy au lieu du backend
-curl http://localhost:8080/api/health
-curl -X POST http://localhost:8080/api/login -d '{"user":"bob"}'
 ```
 
-Chaque échange s'affiche en direct et s'écrit dans `captures/session-<ts>.rrlog` :
-
-```
-1782092105674-000001  GET    /api/health   ->  200  1ms
-1782092105686-000002  POST   /api/login    ->  200  2ms
-```
-
-Puis rejoue n'importe quelle requête capturée par son id :
+Point the client at the proxy:
 
 ```bash
-reqradar replay 1782092105686-000002          # utilise le dernier .rrlog de ./captures
-reqradar replay <id> --file session.rrlog     # fichier explicite
-reqradar replay <id> --target http://staging  # rejoue ailleurs
+curl http://127.0.0.1:8080/api/health
+curl -X POST http://127.0.0.1:8080/api/login -d '{"user":"bob"}'
 ```
 
-> Utilise `--json` sur `capture` pour cracher l'échange complet (headers + body)
-> en JSON sur stdout.
-
-## Aperçu de la CLI
+Live one-liners go to stdout; the session is appended to `captures/session-<ts>.rrlog`.
 
 ```bash
-reqradar capture --target <url>   # reverse proxy transparent + capture  ✅
-reqradar replay <id>              # rejoue une requête capturée           ✅
-reqradar capture --web            # capture + dashboard web (React/Vite)  ⏳
-reqradar diff <a> <b>             # compare deux captures                 ⏳
-reqradar report <id>              # exporte un rapport de bug (MD/PDF)     ⏳
-reqradar rules check f.yml        # valide tes détecteurs custom (YAML)   ⏳
+reqradar replay <id>                          # newest .rrlog under ./captures
+reqradar replay <id> --file session.rrlog
+reqradar replay <id> --target http://127.0.0.1:3000
+
+reqradar report <id>                          # Markdown on stdout, secrets redacted
+reqradar report <id> -o bug.md
 ```
+
+`--json` on `capture` prints each exchange as JSON on stdout with credential headers redacted. The on-disk `.rrlog` keeps original values so replay can authenticate.
+
+## CLI
+
+| Command | Status |
+| --- | --- |
+| `reqradar capture --target <url>` | Shipped |
+| `reqradar replay <id>` | Shipped |
+| `reqradar report <id>` | Shipped (Markdown; PDF is not) |
+| `reqradar capture --web` | Not implemented |
+| `reqradar diff` | Not implemented |
+| `reqradar rules` | Not implemented |
+
+Useful `capture` flags:
+
+- `--listen 127.0.0.1:8080` — non-loopback binds require `--allow-lan`
+- `--max-body-bytes` — default 1 MiB; larger bodies return 413
+- `--out path.rrlog`
+- `-v` / `-vv` / `-vvv` — tracing on stderr
+
+## Architecture
+
+```
+client  -->  ReqRadar (HTTP/1 reverse proxy)  -->  upstream
+                 |
+                 +-- append Exchange as JSON Lines (.rrlog, mode 0600)
+                 +-- replay / report read the same file
+```
+
+The crate is a library (`reqradar`) plus a thin binary. Integration tests drive `spawn()` against an in-process upstream.
+
+## Security
+
+`.rrlog` files contain original headers and bodies, including cookies and `Authorization`. They are created `0600` on Unix and `captures/` is gitignored. Treat them as secrets. Reports redact a fixed list of credential headers. Details: [SECURITY.md](SECURITY.md).
+
+## Development
+
+Requires Rust 1.82+ (CI uses stable).
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+```
+
+Workflow: [CONTRIBUTING.md](CONTRIBUTING.md). GitHub Flow (`main` + PR). No `develop` branch.
 
 ## Roadmap
 
-La **phase zéro** a posé les fondations (structure Cargo, surface CLI, CI,
-licences). La **phase un** ajoute le moteur de capture et le replay.
+Shipped in this development line: capture, `.rrlog`, replay, Markdown report, bind guard, body cap, header redaction on shareable output.
 
-### Cœur
+Next, in order:
 
-- [x] **Moteur de capture** — reverse proxy HTTP transparent qui enregistre
-      requêtes et réponses (HTTPS/forward proxy à venir)
-- [x] **Stockage des captures** — format `.rrlog` rejouable et diffable (JSON Lines)
-- [ ] **Détecteurs de patterns** — N+1, lenteurs, statuts d'erreur, fuites de secrets
+1. Built-in detectors (5xx, slow requests, leaked `Authorization` in report bodies)
+2. `diff` of two `.rrlog` files
+3. YAML rules
+4. TUI, then `--web`
+5. HTTPS / `brew` / crates.io only after the CLI loop is boring
 
-### Expérience
+## License
 
-- [ ] **Mode hybride CLI/Web** — TUI terminal (ratatui) + `--web` qui lance un
-      dashboard React/Vite avec graphes de patterns et arbre de requêtes
-- [x] **Replay** — rejoue une requête capturée en un clic/commande pour reproduire un bug
-- [ ] **Diff de requêtes** — compare deux captures (avant/après un déploiement) et
-      montre ce qui a changé
-- [ ] **Export « rapport de bug »** — génère un Markdown/PDF prêt à coller dans un
-      ticket Jira/Linear avec tout le contexte
-- [ ] **Règles custom en YAML** — chacun écrit ses propres détecteurs sans toucher
-      au code Rust
-
-### Distribution
-
-- [ ] **`brew install reqradar`** + **`cargo install reqradar`** + **binaire statique
-      téléchargeable** — zéro dépendance, zéro friction
-
-## Développement
-
-Prérequis : Rust stable (édition 2021).
-
-```bash
-cargo build            # compile
-cargo run -- --help    # affiche l'aide
-cargo test             # tests
-cargo clippy --all-targets --all-features -- -D warnings
-cargo fmt --all
-```
-
-## Licence
-
-Sous double licence, au choix :
-
-- Apache License 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT ([LICENSE-MIT](LICENSE-MIT))
-
-Sauf indication contraire, toute contribution que tu soumets est destinée à être
-double-licenciée comme ci-dessus, sans condition supplémentaire.
+MIT OR Apache-2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).

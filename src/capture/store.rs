@@ -1,6 +1,6 @@
 //! `.rrlog` storage: one JSON object per line (JSON Lines).
 //!
-//! Phase-zero decision: keep persistence dead simple and append-only. JSON Lines
+//! Keep persistence dead simple and append-only. JSON Lines
 //! is greppable, diff-friendly and trivial to stream. A richer embedded store
 //! (e.g. sled) can come later behind this same API.
 
@@ -28,9 +28,14 @@ impl Store {
                     .with_context(|| format!("creating directory {}", parent.display()))?;
             }
         }
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
+        let mut opts = OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let file = opts
             .open(&path)
             .with_context(|| format!("opening {} for writing", path.display()))?;
         Ok(Self { path, file })
@@ -116,6 +121,22 @@ mod tests {
         let found = find(&path, "1-000002").unwrap();
         assert!(found.is_some());
         assert!(find(&path, "nope").unwrap().is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn creates_file_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("rrlog-mode-{}", std::process::id()));
+        let path = dir.join("session.rrlog");
+        let _ = fs::remove_dir_all(&dir);
+
+        let _store = Store::create(&path).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
 
         let _ = fs::remove_dir_all(&dir);
     }

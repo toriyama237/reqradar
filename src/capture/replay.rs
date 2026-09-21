@@ -37,7 +37,16 @@ pub async fn run(file: &Path, id: &str, target: Option<&str>) -> Result<ReplayOu
 
     let client = client::build_client();
     let timer = std::time::Instant::now();
-    let response = client::send(&client, &method, &url, &original.request.headers, body).await;
+    // Replay uses the same 1 MiB cap as capture unless we later thread a flag.
+    let response = client::send(
+        &client,
+        &method,
+        &url,
+        &original.request.headers,
+        body,
+        1_048_576,
+    )
+    .await;
     let latency_ms = timer.elapsed().as_millis() as u64;
 
     let response = match response {

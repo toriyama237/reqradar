@@ -9,7 +9,9 @@ use crate::capture::proxy::{self, ProxyConfig};
 
 use super::not_yet_implemented;
 
-#[derive(Debug, Default, Args)]
+const DEFAULT_MAX_BODY_BYTES: usize = 1_048_576;
+
+#[derive(Debug, Args)]
 pub struct CaptureArgs {
     /// Upstream backend to forward captured traffic to (e.g. http://localhost:3000).
     #[arg(long)]
@@ -23,17 +25,40 @@ pub struct CaptureArgs {
     #[arg(short, long)]
     pub out: Option<PathBuf>,
 
-    /// Print full JSON per exchange instead of a compact one-line summary.
+    /// Print one JSON object per exchange on stdout (sensitive headers redacted).
     #[arg(long)]
     pub json: bool,
 
-    /// Launch the web dashboard (React/Vite) instead of the terminal TUI.
+    /// Launch the web dashboard (not implemented yet).
     #[arg(long)]
     pub web: bool,
 
     /// Port for the web dashboard (only with --web).
     #[arg(long, default_value_t = 7777)]
     pub web_port: u16,
+
+    /// Allow binding a non-loopback address. ReqRadar has no auth on the listen port.
+    #[arg(long)]
+    pub allow_lan: bool,
+
+    /// Maximum request or response body buffered in memory (bytes).
+    #[arg(long, default_value_t = DEFAULT_MAX_BODY_BYTES)]
+    pub max_body_bytes: usize,
+}
+
+impl Default for CaptureArgs {
+    fn default() -> Self {
+        Self {
+            target: None,
+            listen: "127.0.0.1:8080".into(),
+            out: None,
+            json: false,
+            web: false,
+            web_port: 7777,
+            allow_lan: false,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+        }
+    }
 }
 
 pub fn run(args: CaptureArgs) -> Result<()> {
@@ -61,6 +86,8 @@ pub fn run(args: CaptureArgs) -> Result<()> {
         target,
         out,
         json: args.json,
+        allow_lan: args.allow_lan,
+        max_body_bytes: args.max_body_bytes,
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

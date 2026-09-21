@@ -1,0 +1,42 @@
+name: Bug
+description: Something does not work as documented
+title: "fix: "
+labels: [bug]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Command, backend, OS, ReqRadar version (`reqradar --version`).
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened. Include the exact error.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal steps. Do not paste live secrets; redact first.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing
