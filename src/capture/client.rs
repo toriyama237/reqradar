@@ -11,12 +11,53 @@ use hyper_util::rt::TokioExecutor;
 
 use super::record::{Body, Header, ResponseRecord};
 
-/// Connection-pooled HTTP/1 client over plain TCP (no TLS yet — phase one
-/// targets local backends).
+/// Connection-pooled HTTP/1 client over plain TCP (no TLS yet — local backends).
 pub type HttpClient = Client<HttpConnector, Full<Bytes>>;
 
 pub fn build_client() -> HttpClient {
     Client::builder(TokioExecutor::new()).build_http()
+}
+
+#[derive(Debug)]
+pub enum CollectError {
+    TooLarge { max: usize },
+    Body(hyper::Error),
+}
+
+impl std::fmt::Display for CollectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CollectError::TooLarge { max } => {
+                write!(f, "body exceeds --max-body-bytes ({max})")
+            }
+            CollectError::Body(e) => write!(f, "reading body: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for CollectError {}
+
+/// Buffer a body, aborting if it would exceed `max` bytes.
+pub async fn collect_capped(
+    mut body: hyper::body::Incoming,
+    max: usize,
+) -> Result<Bytes, CollectError> {
+    let mut out = Vec::new();
+    loop {
+        match body.frame().await {
+            None => break,
+            Some(Err(e)) => return Err(CollectError::Body(e)),
+            Some(Ok(frame)) => {
+                if let Ok(data) = frame.into_data() {
+                    if out.len().saturating_add(data.len()) > max {
+                        return Err(CollectError::TooLarge { max });
+                    }
+                    out.extend_from_slice(&data);
+                }
+            }
+        }
+    }
+    Ok(Bytes::from(out))
 }
 
 /// Hop-by-hop headers must not be forwarded between connections.
@@ -51,6 +92,7 @@ pub async fn send(
     url: &str,
     headers: &[Header],
     body: Bytes,
+    max_body_bytes: usize,
 ) -> Result<ResponseRecord> {
     let uri: Uri = url
         .parse()
@@ -88,11 +130,9 @@ pub async fn send(
         .context("forwarding request upstream")?;
 
     let (parts, body) = response.into_parts();
-    let bytes = body
-        .collect()
+    let bytes = collect_capped(body, max_body_bytes)
         .await
-        .context("reading upstream response body")?
-        .to_bytes();
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     Ok(ResponseRecord {
         status: parts.status.as_u16(),

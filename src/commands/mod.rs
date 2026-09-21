@@ -6,14 +6,12 @@ pub mod rules;
 
 use anyhow::{bail, Result};
 
-/// Phase-zero placeholder: every subcommand is scaffolded but not yet wired up.
-///
-/// This keeps the CLI surface stable while the underlying engine is built out
-/// phase by phase (see the roadmap in README.md).
+/// Features that are on the CLI surface so the command names stay stable, but
+/// are not implemented in this version.
 pub(crate) fn not_yet_implemented(feature: &str) -> Result<()> {
     bail!(
-        "`{feature}` is not implemented yet.\n\
-         ReqRadar is in phase zero (project bootstrap). Follow the roadmap in the README \
-         to see when this lands: https://github.com/toriyama237/reqradar#roadmap"
+        "`{feature}` is not implemented in 0.1.0-dev.\n\
+         Shipped today: `capture` (HTTP reverse proxy) and `replay`, plus `report` (Markdown).\n\
+         See the roadmap: https://github.com/toriyama237/reqradar#roadmap"
     );
 }

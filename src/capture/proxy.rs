@@ -10,17 +10,19 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use chrono::Utc;
-use http_body_util::{BodyExt, Full};
+use http_body_util::Full;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::service::service_fn;
-use hyper::{Request, Response, StatusCode, Uri};
+use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 
-use super::client::{self, HttpClient};
+use super::client::{self, CollectError, HttpClient};
 use super::id::IdGen;
 use super::record::{Body, Exchange, RequestRecord};
 use super::store::Store;
+use crate::redact;
 
 pub struct ProxyConfig {
     pub listen: SocketAddr,
@@ -28,8 +30,25 @@ pub struct ProxyConfig {
     pub target: String,
     /// Where to write captured exchanges.
     pub out: PathBuf,
-    /// Print full JSON per exchange instead of a compact summary.
+    /// Print JSON per exchange (redacted) instead of a compact summary.
     pub json: bool,
+    /// Permit non-loopback listen addresses.
+    pub allow_lan: bool,
+    /// Max buffered request or response body, in bytes.
+    pub max_body_bytes: usize,
+}
+
+pub struct RunningProxy {
+    pub addr: SocketAddr,
+    pub log_path: PathBuf,
+    pub upstream: String,
+    join: JoinHandle<Result<()>>,
+}
+
+impl RunningProxy {
+    pub fn abort(&self) {
+        self.join.abort();
+    }
 }
 
 struct Ctx {
@@ -38,6 +57,7 @@ struct Ctx {
     store: Mutex<Store>,
     ids: IdGen,
     json: bool,
+    max_body_bytes: usize,
 }
 
 /// Normalize the target into a `scheme://authority` base, rejecting anything we
@@ -48,7 +68,7 @@ fn normalize_target(target: &str) -> Result<String> {
     } else {
         format!("http://{target}")
     };
-    let uri: Uri = with_scheme
+    let uri: hyper::Uri = with_scheme
         .parse()
         .with_context(|| format!("invalid --target: {target}"))?;
     let scheme = uri.scheme_str().unwrap_or("http");
@@ -62,7 +82,57 @@ fn normalize_target(target: &str) -> Result<String> {
     Ok(format!("http://{authority}"))
 }
 
+fn assert_bind_allowed(addr: SocketAddr, allow_lan: bool) -> Result<()> {
+    if addr.ip().is_loopback() {
+        return Ok(());
+    }
+    if allow_lan {
+        tracing::warn!(
+            %addr,
+            "listening on a non-loopback address; there is no authentication on this port"
+        );
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to bind {addr}: ReqRadar has no listen-port authentication. \
+         Bind 127.0.0.1 or pass --allow-lan"
+    );
+}
+
+/// Bind and serve until Ctrl-C. Used by the CLI.
 pub async fn serve(config: ProxyConfig) -> Result<()> {
+    let running = spawn(config).await?;
+    eprintln!("ReqRadar capturing");
+    eprintln!("  listen   http://{}", running.addr);
+    eprintln!("  upstream {}", running.upstream);
+    eprintln!("  log      {}", running.log_path.display());
+    eprintln!("  (Ctrl-C to stop)\n");
+    tracing::warn!(
+        path = %running.log_path.display(),
+        "captures store original headers and bodies; treat the file as a secrets store"
+    );
+
+    let abort = running.join.abort_handle();
+    let log_path = running.log_path.clone();
+
+    tokio::select! {
+        res = running.join => match res {
+            Ok(inner) => inner,
+            Err(e) if e.is_cancelled() => Ok(()),
+            Err(e) => Err(anyhow::anyhow!("proxy task failed: {e}")),
+        },
+        _ = tokio::signal::ctrl_c() => {
+            abort.abort();
+            eprintln!("\nStopped. Captures saved to {}", log_path.display());
+            Ok(())
+        }
+    }
+}
+
+/// Bind the proxy and return immediately. The accept loop runs on a task.
+/// Tests abort the task when they are done.
+pub async fn spawn(config: ProxyConfig) -> Result<RunningProxy> {
+    assert_bind_allowed(config.listen, config.allow_lan)?;
     let base = normalize_target(&config.target)?;
     let store = Store::create(&config.out)?;
     let store_path = store.path().to_path_buf();
@@ -73,25 +143,23 @@ pub async fn serve(config: ProxyConfig) -> Result<()> {
         store: Mutex::new(store),
         ids: IdGen::new(),
         json: config.json,
+        max_body_bytes: config.max_body_bytes,
     });
 
     let listener = TcpListener::bind(config.listen)
         .await
         .with_context(|| format!("binding {}", config.listen))?;
+    let addr = listener.local_addr().context("reading bound address")?;
 
-    eprintln!("ReqRadar capturing");
-    eprintln!("  listen   http://{}", config.listen);
-    eprintln!("  upstream {base}");
-    eprintln!("  log      {}", store_path.display());
-    eprintln!("  (Ctrl-C to stop)\n");
+    tracing::info!(%addr, upstream = %base, "proxy listening");
 
-    tokio::select! {
-        res = accept_loop(listener, ctx) => res,
-        _ = tokio::signal::ctrl_c() => {
-            eprintln!("\nStopped. Captures saved to {}", store_path.display());
-            Ok(())
-        }
-    }
+    let join = tokio::spawn(accept_loop(listener, ctx));
+    Ok(RunningProxy {
+        addr,
+        log_path: store_path,
+        upstream: base,
+        join,
+    })
 }
 
 async fn accept_loop(listener: TcpListener, ctx: Arc<Ctx>) -> Result<()> {
@@ -105,7 +173,7 @@ async fn accept_loop(listener: TcpListener, ctx: Arc<Ctx>) -> Result<()> {
                 .serve_connection(io, service)
                 .await
             {
-                eprintln!("connection error: {err}");
+                tracing::debug!("connection error: {err}");
             }
         });
     }
@@ -119,9 +187,14 @@ async fn handle(
     let timer = Instant::now();
 
     let (parts, body) = req.into_parts();
-    let body_bytes = match body.collect().await {
-        Ok(b) => b.to_bytes(),
-        Err(e) => return Ok(bad_gateway(format!("reading request body: {e}"))),
+    let body_bytes = match client::collect_capped(body, ctx.max_body_bytes).await {
+        Ok(b) => b,
+        Err(CollectError::TooLarge { max }) => {
+            return Ok(payload_too_large(max));
+        }
+        Err(CollectError::Body(e)) => {
+            return Ok(bad_gateway(format!("reading request body: {e}")));
+        }
     };
 
     let path_and_query = parts
@@ -143,7 +216,15 @@ async fn handle(
     };
 
     let id = ctx.ids.next(started);
-    let result = client::send(&ctx.client, &parts.method, &url, &req_headers, body_bytes).await;
+    let result = client::send(
+        &ctx.client,
+        &parts.method,
+        &url,
+        &req_headers,
+        body_bytes,
+        ctx.max_body_bytes,
+    )
+    .await;
     let latency_ms = timer.elapsed().as_millis() as u64;
 
     let (response_record, error, client_response) = match result {
@@ -153,7 +234,8 @@ async fn handle(
         }
         Err(e) => {
             let msg = format!("{e:#}");
-            let resp = bad_gateway(format!("ReqRadar upstream error: {msg}"));
+            let resp = bad_gateway("ReqRadar upstream error".to_string());
+            tracing::warn!(id = %id, error = %msg, "upstream forward failed");
             (None, Some(msg), resp)
         }
     };
@@ -170,14 +252,15 @@ async fn handle(
 
     if let Ok(mut store) = ctx.store.lock() {
         if let Err(e) = store.append(&exchange) {
-            eprintln!("failed to persist exchange {}: {e}", exchange.id);
+            tracing::error!("failed to persist exchange {}: {e}", exchange.id);
         }
     }
 
     if ctx.json {
-        match serde_json::to_string(&exchange) {
+        let display = redact::exchange_for_display(&exchange);
+        match serde_json::to_string(&display) {
             Ok(line) => println!("{line}"),
-            Err(e) => eprintln!("failed to serialize exchange: {e}"),
+            Err(e) => tracing::error!("failed to serialize exchange: {e}"),
         }
     } else {
         println!("{}", exchange.summary());
@@ -217,4 +300,13 @@ fn bad_gateway(message: String) -> Response<Full<Bytes>> {
         .header("content-type", "text/plain; charset=utf-8")
         .body(Full::new(Bytes::from(message)))
         .expect("static 502 response is valid")
+}
+
+fn payload_too_large(max: usize) -> Response<Full<Bytes>> {
+    let msg = format!("ReqRadar: request body exceeds --max-body-bytes ({max})");
+    Response::builder()
+        .status(StatusCode::PAYLOAD_TOO_LARGE)
+        .header("content-type", "text/plain; charset=utf-8")
+        .body(Full::new(Bytes::from(msg)))
+        .expect("static 413 response is valid")
 }
